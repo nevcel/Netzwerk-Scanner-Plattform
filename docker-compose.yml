@@ -1,0 +1,35 @@
+services:
+  database:
+    image: postgres:16-alpine
+    container_name: network-scanner-db
+
+    # Zugangsdaten werden nicht direkt in dieser Datei gespeichert,
+    # sondern aus der lokalen .env-Datei übernommen.
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      # Das Volume stellt sicher, dass die Daten auch nach
+      # einem Neustart des Containers erhalten bleiben.
+      - postgres_data:/var/lib/postgresql/data
+
+      # Beim ersten Erstellen der Datenbank wird das Grundschema ausgeführt.
+      - ./database/migrations:/docker-entrypoint-initdb.d:ro
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
