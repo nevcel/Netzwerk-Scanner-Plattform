@@ -1,0 +1,15 @@
+# Lokale Konfiguration mit Zugangsdaten
+.env
+
+# Go
+bin/
+*.exe
+*.test
+*.out
+
+# VS Code
+.vscode/
+
+# Betriebssystemdateien
+.DS_Store
+Thumbs.db
