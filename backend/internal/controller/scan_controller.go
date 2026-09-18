@@ -9,21 +9,21 @@ import (
 )
 
 // ScanController verarbeitet die Scan-Anfragen des Clients.
-// Die eigentliche Kommunikation mit dem Scanner erfolgt über den ScannerService.
+// Die eigentliche Geschäftslogik wird über den ScanService ausgeführt.
 type ScanController struct {
-	scannerService *service.ScannerService
+	scanService *service.ScanService
 }
 
 // NewScanController erstellt einen neuen Controller
 // für das Starten und Abfragen von Scanaufträgen.
-func NewScanController(scannerService *service.ScannerService) *ScanController {
+func NewScanController(scanService *service.ScanService) *ScanController {
 	return &ScanController{
-		scannerService: scannerService,
+		scanService: scanService,
 	}
 }
 
 // CreateScan nimmt ein Scan-Ziel entgegen und
-// übergibt den Auftrag an die Scanner-Komponente.
+// übergibt den Auftrag an den ScanService.
 func (c *ScanController) CreateScan(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -40,7 +40,7 @@ func (c *ScanController) CreateScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := c.scannerService.CreateScan(r.Context(), request.Target)
+	job, err := c.scanService.CreateScan(r.Context(), request.Target)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{
@@ -62,7 +62,7 @@ func (c *ScanController) GetScan(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 
-	job, err := c.scannerService.GetScan(r.Context(), id)
+	job, err := c.scanService.GetScan(r.Context(), id)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]string{
