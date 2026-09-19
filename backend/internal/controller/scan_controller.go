@@ -73,3 +73,45 @@ func (c *ScanController) GetScan(w http.ResponseWriter, r *http.Request) {
 
 	_ = json.NewEncoder(w).Encode(job)
 }
+
+// GetResults liefert die strukturierten Scanergebnisse als JSON.
+// Das Frontend muss dadurch keine Nmap-XML-Daten selbst verarbeiten.
+func (c *ScanController) GetResults(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	id := r.PathValue("id")
+
+	result, err := c.scanService.GetResults(r.Context(), id)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "scanergebnisse konnten nicht geladen werden",
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+// GetHistory stellt die gespeicherten Scanläufe als JSON bereit.
+// Die Historie wird später in der Weboberfläche angezeigt.
+func (c *ScanController) GetHistory(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	history, err := c.scanService.GetHistory(r.Context())
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "scan-historie konnte nicht geladen werden",
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+
+	_ = json.NewEncoder(w).Encode(history)
+}

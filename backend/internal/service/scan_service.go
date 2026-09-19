@@ -92,3 +92,22 @@ func (s *ScanService) GetScan(
 
 	return job, nil
 }
+
+// GetResults liest die bereits gespeicherten Scanergebnisse
+// aus PostgreSQL und stellt sie für die REST-API bereit.
+func (s *ScanService) GetResults(
+	ctx context.Context,
+	id string,
+) (*model.ScanResults, error) {
+
+	return s.repository.GetResults(ctx, id)
+}
+
+// GetHistory liest die zuletzt gespeicherten Scanläufe
+// über das Repository aus PostgreSQL.
+func (s *ScanService) GetHistory(
+	ctx context.Context,
+) (*model.ScanHistory, error) {
+
+	return s.repository.GetHistory(ctx)
+}

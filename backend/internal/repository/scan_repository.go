@@ -281,3 +281,234 @@ func (r *ScanRepository) GetByScanID(
 
 	return &job, nil
 }
+
+// GetResults liest die strukturierten Ergebnisse eines Scanlaufs
+// aus PostgreSQL und bereitet sie für die REST-API auf.
+func (r *ScanRepository) GetResults(
+	ctx context.Context,
+	scanID string,
+) (*model.ScanResults, error) {
+
+	// Die Tabellen werden über ihre Fremdschlüssel verbunden.
+	// LEFT JOIN stellt sicher, dass auch Hosts ohne erkannte Ports
+	// oder Scanläufe ohne erkannte Hosts zurückgegeben werden können.
+	query := `
+		SELECT
+			s.scan_id,
+			h.id,
+			COALESCE(host(h.ip_address), ''),
+			COALESCE(h.hostname, ''),
+			COALESCE(h.state, ''),
+			p.id,
+			COALESCE(p.port_number, 0),
+			COALESCE(p.protocol, ''),
+			COALESCE(p.state, ''),
+			sv.id,
+			COALESCE(sv.name, ''),
+			COALESCE(sv.product, ''),
+			COALESCE(sv.version, '')
+		FROM scans s
+		LEFT JOIN hosts h ON h.scan_id = s.id
+		LEFT JOIN ports p ON p.host_id = h.id
+		LEFT JOIN services sv ON sv.port_id = p.id
+		WHERE s.scan_id = $1
+		ORDER BY h.ip_address, p.port_number
+	`
+
+	rows, err := r.db.Query(ctx, query, scanID)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"scanergebnisse konnten nicht gelesen werden: %w",
+			err,
+		)
+	}
+	defer rows.Close()
+
+	result := &model.ScanResults{
+		ScanID: scanID,
+		Hosts:  make([]model.HostResult, 0),
+	}
+
+	// Die interne Host-ID dient zur Zuordnung der Ports.
+	// Dadurch wird jeder Host nur einmal in die Antwort übernommen.
+	hostIndex := make(map[int64]int)
+
+	found := false
+
+	for rows.Next() {
+		found = true
+
+		var returnedScanID string
+
+		// IDs können bei LEFT JOIN NULL sein.
+		// Deshalb werden Pointer für optionale Datensätze verwendet.
+		var hostID *int64
+		var portID *int64
+		var serviceID *int64
+
+		var ipAddress string
+		var hostname string
+		var hostState string
+
+		var portNumber int
+		var protocol string
+		var portState string
+
+		var serviceName string
+		var product string
+		var version string
+
+		err := rows.Scan(
+			&returnedScanID,
+			&hostID,
+			&ipAddress,
+			&hostname,
+			&hostState,
+			&portID,
+			&portNumber,
+			&protocol,
+			&portState,
+			&serviceID,
+			&serviceName,
+			&product,
+			&version,
+		)
+
+		if err != nil {
+			return nil, fmt.Errorf(
+				"scanergebnis konnte nicht verarbeitet werden: %w",
+				err,
+			)
+		}
+
+		// Ein Scanlauf kann existieren, ohne dass Hosts erkannt wurden.
+		if hostID == nil {
+			continue
+		}
+
+		index, exists := hostIndex[*hostID]
+
+		if !exists {
+			result.Hosts = append(
+				result.Hosts,
+				model.HostResult{
+					IPAddress: ipAddress,
+					Hostname:  hostname,
+					State:     hostState,
+					Ports:     make([]model.PortResult, 0),
+				},
+			)
+
+			index = len(result.Hosts) - 1
+			hostIndex[*hostID] = index
+		}
+
+		// Hosts ohne erkannte Ports werden ebenfalls berücksichtigt.
+		if portID == nil {
+			continue
+		}
+
+		port := model.PortResult{
+			Number:   portNumber,
+			Protocol: protocol,
+			State:    portState,
+		}
+
+		// Dienstinformationen sind optional.
+		if serviceID != nil {
+			port.Service = &model.ServiceResult{
+				Name:    serviceName,
+				Product: product,
+				Version: version,
+			}
+		}
+
+		result.Hosts[index].Ports = append(
+			result.Hosts[index].Ports,
+			port,
+		)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf(
+			"fehler beim Lesen der Scanergebnisse: %w",
+			err,
+		)
+	}
+
+	// Falls keine Zeile zurückgegeben wurde,
+	// existiert die angeforderte Scan-ID nicht.
+	if !found {
+		return nil, errors.New("scanauftrag nicht gefunden")
+	}
+
+	return result, nil
+}
+
+// GetHistory liest die letzten 50 Scanläufe aus PostgreSQL.
+// Die Ergebnisse werden nach Erstellungsdatum absteigend sortiert,
+// sodass der neueste Scan zuerst angezeigt wird.
+func (r *ScanRepository) GetHistory(
+	ctx context.Context,
+) (*model.ScanHistory, error) {
+
+	query := `
+		SELECT
+			s.scan_id,
+			s.target,
+			s.status,
+			COUNT(h.id) AS host_count,
+			s.created_at,
+			s.updated_at
+		FROM scans s
+		LEFT JOIN hosts h ON h.scan_id = s.id
+		GROUP BY s.id
+		ORDER BY s.created_at DESC, s.id DESC
+		LIMIT 50
+	`
+
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"scan-historie konnte nicht geladen werden: %w",
+			err,
+		)
+	}
+	defer rows.Close()
+
+	history := &model.ScanHistory{
+		Scans: make([]model.ScanHistoryItem, 0),
+	}
+
+	// Jeder Scanlauf wird in ein eigenes Datenmodell übertragen.
+	for rows.Next() {
+		var item model.ScanHistoryItem
+
+		if err := rows.Scan(
+			&item.ID,
+			&item.Target,
+			&item.Status,
+			&item.HostCount,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf(
+				"scan-historie konnte nicht verarbeitet werden: %w",
+				err,
+			)
+		}
+
+		history.Scans = append(history.Scans, item)
+	}
+
+	// Auch Fehler, die während des Lesens der Datensätze
+	// auftreten, werden kontrolliert zurückgegeben.
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf(
+			"fehler beim Lesen der Scan-Historie: %w",
+			err,
+		)
+	}
+
+	return history, nil
+}

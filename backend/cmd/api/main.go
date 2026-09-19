@@ -26,54 +26,77 @@ func main() {
 	log.Println("Verbindung zu PostgreSQL erfolgreich hergestellt")
 
 	// Die Scanner-Adresse wird über eine Umgebungsvariable konfiguriert.
-	// Für die lokale Entwicklung wird localhost verwendet.
+	// Innerhalb von Docker Compose wird http://scanner:8081 verwendet.
+	// Für die lokale Entwicklung dient localhost als Standard.
 	scannerURL := os.Getenv("SCANNER_URL")
 	if scannerURL == "" {
 		scannerURL = "http://localhost:8081"
 	}
 
-	// Aufbau der einzelnen Anwendungsschichten.
+	// Aufbau der Anwendungsschichten.
+	// Der ScannerService übernimmt die Kommunikation mit dem Scanner.
 	scannerService := service.NewScannerService(scannerURL)
 
+	// Das Repository ist für die Datenbankzugriffe verantwortlich.
 	scanRepository := repository.NewScanRepository(dbPool)
 
+	// Der ScanService verbindet Scanner-Kommunikation
+	// und dauerhafte Speicherung in PostgreSQL.
 	scanService := service.NewScanService(
 		scannerService,
 		scanRepository,
 	)
 
+	// Die Controller verarbeiten die HTTP-Anfragen des Clients.
 	scannerController := controller.NewScannerController(scannerService)
 	scanController := controller.NewScanController(scanService)
 
 	mux := http.NewServeMux()
 
-	// Health-Endpunkt zur Prüfung des Backends.
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "backend ok")
-	})
+	// Prüft, ob das Backend grundsätzlich erreichbar ist.
+	mux.HandleFunc(
+		"GET /health",
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, "backend ok")
+		},
+	)
 
-	// Prüft die Erreichbarkeit der getrennten Scanner-Komponente.
+	// Prüft die Verbindung zur getrennten Scanner-Komponente.
 	mux.HandleFunc(
 		"GET /api/scanner/health",
 		scannerController.Health,
 	)
 
-	// API-Endpunkte zum Starten und Abfragen von Scanaufträgen.
+	// Erstellt einen neuen asynchronen Scanauftrag.
 	mux.HandleFunc(
 		"POST /api/scans",
 		scanController.CreateScan,
 	)
 
+	// Liefert die letzten 50 gespeicherten Scanläufe.
+	mux.HandleFunc(
+		"GET /api/scans",
+		scanController.GetHistory,
+	)
+
+	// Liefert den aktuellen Status eines Scanauftrags.
 	mux.HandleFunc(
 		"GET /api/scans/{id}",
 		scanController.GetScan,
 	)
 
+	// Liefert die strukturierten Hosts, Ports und Dienste
+	// eines Scanlaufs aus der PostgreSQL-Datenbank.
+	mux.HandleFunc(
+		"GET /api/scans/{id}/results",
+		scanController.GetResults,
+	)
+
 	log.Println("Backend läuft auf Port 8080")
 
 	// Der HTTP-Server stellt die REST-Schnittstelle
-	// für das spätere Web-Frontend bereit.
+	// für die spätere Weboberfläche bereit.
 	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Printf("HTTP-Server wurde beendet: %v", err)
 	}
