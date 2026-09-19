@@ -1,35 +1,105 @@
 services:
+
+  # PostgreSQL-Datenbank
   database:
     image: postgres:16-alpine
     container_name: network-scanner-db
 
-    # Zugangsdaten werden nicht direkt in dieser Datei gespeichert,
-    # sondern aus der lokalen .env-Datei übernommen.
+    # Die Zugangsdaten werden aus der lokalen .env-Datei gelesen.
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
 
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
 
     volumes:
-      # Das Volume stellt sicher, dass die Daten auch nach
-      # einem Neustart des Containers erhalten bleiben.
+      # Die Daten bleiben auch nach einem Container-Neustart erhalten.
       - postgres_data:/var/lib/postgresql/data
 
-      # Beim ersten Erstellen der Datenbank wird das Grundschema ausgeführt.
+      # Das Datenbankschema wird bei der ersten Initialisierung erstellt.
       - ./database/migrations:/docker-entrypoint-initdb.d:ro
 
     healthcheck:
       test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
-        ]
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}
       interval: 5s
       timeout: 5s
       retries: 5
 
+    restart: unless-stopped
+
+
+  # Scanner-Komponente mit integrierter Nmap-Installation
+  scanner:
+    build:
+      context: ./scanner
+      dockerfile: Dockerfile
+
+    image: network-scanner-scanner:dev
+    container_name: network-scanner-scanner
+
+    # Die Scanner-API ist während der Entwicklung nur lokal erreichbar.
+    # Das spätere Backend kommuniziert direkt über das Docker-Netzwerk.
+    ports:
+      - "127.0.0.1:8081:8081"
+
+    # Der Scanner wird nach einem unerwarteten Abbruch neu gestartet.
+    restart: unless-stopped
+
+    # Überprüfung der internen Scanner-API.
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - -O
+        - /dev/null
+        - http://127.0.0.1:8081/health
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  # Go-Backend mit REST-Schnittstelle
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+    image: network-scanner-backend:dev
+    container_name: network-scanner-backend
+
+    # Das Backend wird über den Browser beziehungsweise
+    # das spätere Frontend angesprochen.
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    # Innerhalb des Docker-Netzwerks werden die Komponenten
+    # direkt über ihre Compose-Service-Namen angesprochen.
+    environment:
+      DB_HOST: database
+      DB_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+      SCANNER_URL: http://scanner:8081
+
+    # Das Backend startet erst, wenn die benötigten
+    # Komponenten ihre Health-Prüfungen bestanden haben.
+    depends_on:
+      database:
+        condition: service_healthy
+
+      scanner:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+
+# Persistente Datenspeicherung
 volumes:
   postgres_data:
