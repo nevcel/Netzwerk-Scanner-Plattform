@@ -18,7 +18,7 @@ FROM alpine:3.21
 
 # Nmap wird direkt im Scanner-Container installiert.
 # Eine separate Installation auf dem Benutzerrechner ist nicht notwendig.
-RUN apk add --no-cache nmap ca-certificates
+RUN apk add --no-cache nmap nmap-scripts ca-certificates
 
 # Der Scanner erhält einen eigenen Benutzer ohne Root-Rechte.
 RUN addgroup -S scanner && adduser -S scanner -G scanner

@@ -81,6 +81,7 @@ func (e *Executor) Run(ctx context.Context, target string) ([]byte, error) {
 		ctx,
 		"nmap",
 		"-sT",
+		"-sV",
 		"-oX",
 		"-",
 		target,
