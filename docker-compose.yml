@@ -98,6 +98,26 @@ services:
         condition: service_healthy
 
     restart: unless-stopped
+  
+   
+  # Weboberfläche und Weiterleitung der REST-Anfragen
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+
+    image: network-scanner-frontend:dev
+    container_name: network-scanner-frontend
+
+    # Die Weboberfläche ist lokal über Port 3000 erreichbar.
+    ports:
+      - "127.0.0.1:3000:80"
+
+    depends_on:
+      - backend
+
+    restart: unless-stopped
 
 
 # Persistente Datenspeicherung

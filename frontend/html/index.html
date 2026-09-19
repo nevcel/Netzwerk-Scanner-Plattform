@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Netzwerk-Scanner</title>
+
+    <!-- Gestaltung und Anwendungslogik werden getrennt eingebunden. -->
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="/js/app.js" defer></script>
+</head>
+
+<body>
+
+    <header>
+        <h1>Netzwerk-Scanner</h1>
+        <p>Netzwerkanalyse und Geräteübersicht</p>
+    </header>
+
+    <main>
+
+        <!-- Eingabe und Start eines neuen Scanauftrags. -->
+        <section id="scan-section">
+
+            <h2>Neuen Scan starten</h2>
+
+            <form id="scan-form">
+
+                <label for="scan-target">
+                    IP-Adresse oder Netzwerk
+                </label>
+
+                <input
+                    type="text"
+                    id="scan-target"
+                    name="target"
+                    placeholder="192.168.1.0/24"
+                    required
+                >
+
+                <button type="submit" id="scan-button">
+                    Scan starten
+                </button>
+
+            </form>
+
+            <p>
+                Es dürfen ausschliesslich autorisierte
+                lokale Netzwerke gescannt werden.
+            </p>
+
+        </section>
+
+        <!-- Anzeige des aktuellen Scanauftrags. -->
+        <section id="status-section" hidden>
+
+            <h2>Scanstatus</h2>
+
+            <p>Scan-ID: <span id="scan-id">–</span></p>
+            <p>Scanziel: <span id="scan-target-display">–</span></p>
+            <p>Status: <span id="scan-status">–</span></p>
+
+            <p id="scan-message" role="status" aria-live="polite"></p>
+
+        </section>
+
+        <!-- Darstellung der strukturierten Scanergebnisse. -->
+        <section id="results-section" hidden>
+
+            <h2>Scanergebnisse</h2>
+
+            <div id="results-container"></div>
+
+        </section>
+
+        <!-- Übersicht der gespeicherten Scanläufe. -->
+        <section id="history-section">
+
+            <h2>Scan-Historie</h2>
+
+            <button type="button" id="refresh-history">
+                Historie aktualisieren
+            </button>
+
+            <div id="history-container"></div>
+
+        </section>
+
+    </main>
+
+    <footer>
+        <p>Netzwerk-Scanner | HF-Diplomarbeit 2026</p>
+    </footer>
+
+</body>
+
+</html>
