@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"network-scanner/backend/internal/controller"
 	"network-scanner/backend/internal/database"
@@ -14,8 +15,8 @@ import (
 )
 
 func main() {
-	// Beim Start wird zuerst die Verbindung zu PostgreSQL hergestellt.
-	// Ohne Datenbankverbindung wird das Backend nicht gestartet.
+	// Beim Start wird die Verbindung zu PostgreSQL überprüft.
+	// Ohne funktionierende Datenbank wird der HTTP-Server nicht gestartet.
 	dbPool, err := database.NewPostgresPool(context.Background())
 	if err != nil {
 		log.Printf("Datenbankfehler: %v", err)
@@ -27,17 +28,16 @@ func main() {
 
 	// Die Scanner-Adresse wird über eine Umgebungsvariable konfiguriert.
 	// Innerhalb von Docker Compose wird http://scanner:8081 verwendet.
-	// Für die lokale Entwicklung dient localhost als Standard.
 	scannerURL := os.Getenv("SCANNER_URL")
 	if scannerURL == "" {
 		scannerURL = "http://localhost:8081"
 	}
 
-	// Aufbau der Anwendungsschichten.
-	// Der ScannerService übernimmt die Kommunikation mit dem Scanner.
+	// Der ScannerService übernimmt die HTTP-Kommunikation
+	// mit der getrennten Scanner-Komponente.
 	scannerService := service.NewScannerService(scannerURL)
 
-	// Das Repository ist für die Datenbankzugriffe verantwortlich.
+	// Das Repository übernimmt die Datenbankzugriffe.
 	scanRepository := repository.NewScanRepository(dbPool)
 
 	// Der ScanService verbindet Scanner-Kommunikation
@@ -47,13 +47,47 @@ func main() {
 		scanRepository,
 	)
 
+	// Offene Scanaufträge werden unabhängig vom Browser
+	// regelmässig mit der Scanner-Komponente abgeglichen.
+	syncCtx, stopSync := context.WithCancel(context.Background())
+	defer stopSync()
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			// Jede Synchronisierung erhält ein eigenes Timeout,
+			// damit Kommunikationsprobleme den Prozess nicht blockieren.
+			ctx, cancel := context.WithTimeout(
+				syncCtx,
+				30*time.Second,
+			)
+
+			err := scanService.SyncActiveScans(ctx)
+			cancel()
+
+			if err != nil && syncCtx.Err() == nil {
+				log.Printf("Scan-Synchronisierung fehlgeschlagen: %v", err)
+			}
+
+			// Nach dem Abgleich wird auf die nächste Prüfung gewartet.
+			select {
+			case <-syncCtx.Done():
+				return
+
+			case <-ticker.C:
+			}
+		}
+	}()
+
 	// Die Controller verarbeiten die HTTP-Anfragen des Clients.
 	scannerController := controller.NewScannerController(scannerService)
 	scanController := controller.NewScanController(scanService)
 
 	mux := http.NewServeMux()
 
-	// Prüft, ob das Backend grundsätzlich erreichbar ist.
+	// Prüft die Erreichbarkeit des Backends.
 	mux.HandleFunc(
 		"GET /health",
 		func(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +96,7 @@ func main() {
 		},
 	)
 
-	// Prüft die Verbindung zur getrennten Scanner-Komponente.
+	// Prüft die Verbindung zur Scanner-Komponente.
 	mux.HandleFunc(
 		"GET /api/scanner/health",
 		scannerController.Health,
@@ -87,7 +121,7 @@ func main() {
 	)
 
 	// Liefert die strukturierten Hosts, Ports und Dienste
-	// eines Scanlaufs aus der PostgreSQL-Datenbank.
+	// eines Scanlaufs aus PostgreSQL.
 	mux.HandleFunc(
 		"GET /api/scans/{id}/results",
 		scanController.GetResults,
@@ -95,8 +129,6 @@ func main() {
 
 	log.Println("Backend läuft auf Port 8080")
 
-	// Der HTTP-Server stellt die REST-Schnittstelle
-	// für die spätere Weboberfläche bereit.
 	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Printf("HTTP-Server wurde beendet: %v", err)
 	}

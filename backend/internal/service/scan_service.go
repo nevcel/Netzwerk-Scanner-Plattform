@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"network-scanner/backend/internal/model"
 	"network-scanner/backend/internal/nmapxml"
@@ -110,4 +111,77 @@ func (s *ScanService) GetHistory(
 ) (*model.ScanHistory, error) {
 
 	return s.repository.GetHistory(ctx)
+}
+
+// SyncActiveScans gleicht offene Scanaufträge mit der Scanner-Komponente ab.
+// Die Funktion wird später regelmässig durch einen Hintergrundprozess aufgerufen.
+// Dadurch bleiben Status und Ergebnisse auch ohne geöffnete Weboberfläche aktuell.
+func (s *ScanService) SyncActiveScans(ctx context.Context) error {
+
+	// Alle noch offenen Scanaufträge aus PostgreSQL lesen.
+	scanIDs, err := s.repository.GetActiveScanIDs(ctx)
+	if err != nil {
+		return fmt.Errorf(
+			"offene Scanaufträge konnten nicht geladen werden: %w",
+			err,
+		)
+	}
+
+	// Jeder Auftrag wird einzeln mit dem Scanner abgeglichen.
+	for _, id := range scanIDs {
+
+		// Falls das Backend beendet wird, soll auch die
+		// laufende Synchronisierung kontrolliert enden.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		job, err := s.scanner.GetScan(ctx, id)
+		if err != nil {
+			log.Printf(
+				"Scan %s konnte nicht synchronisiert werden: %v",
+				id,
+				err,
+			)
+			continue
+		}
+
+		var details *nmapxml.ScanResult
+
+		// Abgeschlossene Scanergebnisse werden strukturiert
+		// ausgewertet, bevor sie in PostgreSQL gespeichert werden.
+		if job.Status == "completed" {
+
+			details, err = nmapxml.Parse([]byte(job.Output))
+			if err != nil {
+				log.Printf(
+					"XML-Verarbeitung für Scan %s fehlgeschlagen: %v",
+					id,
+					err,
+				)
+				continue
+			}
+		}
+
+		// Status und gegebenenfalls Hosts, Ports und Dienste
+		// werden über die bestehende Repository-Funktion gespeichert.
+		if err := s.repository.Update(ctx, job, details); err != nil {
+			log.Printf(
+				"Speicherung von Scan %s fehlgeschlagen: %v",
+				id,
+				err,
+			)
+			continue
+		}
+
+		if job.Status == "completed" || job.Status == "failed" {
+			log.Printf(
+				"Scan %s automatisch synchronisiert: %s",
+				id,
+				job.Status,
+			)
+		}
+	}
+
+	return nil
 }

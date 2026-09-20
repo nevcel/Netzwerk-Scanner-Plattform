@@ -512,3 +512,53 @@ func (r *ScanRepository) GetHistory(
 
 	return history, nil
 }
+
+// GetActiveScanIDs liest alle noch nicht abgeschlossenen Scanaufträge.
+// Diese werden später durch einen Hintergrundprozess regelmässig
+// mit dem aktuellen Zustand der Scanner-Komponente abgeglichen.
+func (r *ScanRepository) GetActiveScanIDs(
+	ctx context.Context,
+) ([]string, error) {
+
+	query := `
+		SELECT scan_id
+		FROM scans
+		WHERE status IN ('pending', 'running')
+		ORDER BY created_at ASC
+	`
+
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"offene scanaufträge konnten nicht geladen werden: %w",
+			err,
+		)
+	}
+	defer rows.Close()
+
+	scanIDs := make([]string, 0)
+
+	// Jeder offene Scanauftrag wird anhand seiner eindeutigen
+	// Scan-ID für die spätere Statussynchronisierung übernommen.
+	for rows.Next() {
+		var scanID string
+
+		if err := rows.Scan(&scanID); err != nil {
+			return nil, fmt.Errorf(
+				"scan-id konnte nicht gelesen werden: %w",
+				err,
+			)
+		}
+
+		scanIDs = append(scanIDs, scanID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf(
+			"fehler beim Lesen der offenen Scanaufträge: %w",
+			err,
+		)
+	}
+
+	return scanIDs, nil
+}

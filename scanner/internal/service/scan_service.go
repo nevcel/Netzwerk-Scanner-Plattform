@@ -12,27 +12,46 @@ import (
 	"network-scanner/scanner/internal/nmap"
 )
 
-// ScanService verwaltet die Scanaufträge und startet
-// die eigentliche Nmap-Ausführung im Hintergrund.
+const (
+	// Maximal zwei Nmap-Scans dürfen gleichzeitig ausgeführt werden.
+	maxConcurrentScans = 2
+
+	// Die Warteschlange nimmt maximal 100 zusätzliche Aufträge auf.
+	maxQueuedScans = 100
+)
+
+// ScanService verwaltet die Scanaufträge und koordiniert
+// deren Ausführung über eine begrenzte Anzahl von Workern.
 type ScanService struct {
 	executor *nmap.Executor
 
-	// Die Scanaufträge werden in dieser ersten Ausbaustufe
-	// vorübergehend im Arbeitsspeicher gespeichert.
 	mu   sync.RWMutex
 	jobs map[string]*model.ScanJob
+
+	// Wartende Scanaufträge werden über diesen Channel
+	// an die verfügbaren Worker weitergegeben.
+	queue chan string
 }
 
-// NewScanService erstellt einen neuen Service für Scanaufträge.
+// NewScanService erstellt den ScanService und startet
+// die beiden Worker für die asynchrone Verarbeitung.
 func NewScanService(executor *nmap.Executor) *ScanService {
-	return &ScanService{
+	s := &ScanService{
 		executor: executor,
 		jobs:     make(map[string]*model.ScanJob),
+		queue:    make(chan string, maxQueuedScans),
 	}
+
+	// Jeder Worker verarbeitet immer nur einen Scan gleichzeitig.
+	for i := 0; i < maxConcurrentScans; i++ {
+		go s.worker()
+	}
+
+	return s
 }
 
-// CreateScan prüft das Ziel und erstellt anschliessend
-// einen neuen asynchronen Scanauftrag.
+// CreateScan validiert das Ziel und erstellt einen neuen Scanauftrag.
+// Die Ausführung erfolgt erst, sobald ein Worker verfügbar ist.
 func (s *ScanService) CreateScan(target string) (*model.ScanJob, error) {
 	if err := s.executor.ValidateTarget(target); err != nil {
 		return nil, err
@@ -53,21 +72,31 @@ func (s *ScanService) CreateScan(target string) (*model.ScanJob, error) {
 		UpdatedAt: now,
 	}
 
+	// Die Kopie verhindert, dass eine spätere Statusänderung
+	// gleichzeitig die HTTP-Antwort verändert.
+	jobCopy := *job
+
 	s.mu.Lock()
 	s.jobs[id] = job
 	s.mu.Unlock()
 
-	// Für die Rückgabe wird eine Kopie erstellt.
-	// Dadurch bleibt die HTTP-Antwort unabhängig von den
-	// anschliessenden Statusänderungen des Hintergrundprozesses.
-	jobCopy := *job
+	// Der Auftrag wird ohne längere Wartezeit angenommen.
+	// Ist die Warteschlange voll, wird er kontrolliert abgelehnt.
+	select {
+	case s.queue <- id:
+		return &jobCopy, nil
 
-	go s.runScan(id)
+	default:
+		s.mu.Lock()
+		delete(s.jobs, id)
+		s.mu.Unlock()
 
-	return &jobCopy, nil
+		return nil, errors.New("scan-warteschlange ist voll")
+	}
 }
 
-// GetScan liefert den aktuellen Zustand eines Scanauftrags.
+// GetScan liefert eine Kopie des aktuellen Scanauftrags.
+// Dadurch bleibt der interne Zustand des Services geschützt.
 func (s *ScanService) GetScan(id string) (*model.ScanJob, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -77,34 +106,68 @@ func (s *ScanService) GetScan(id string) (*model.ScanJob, error) {
 		return nil, errors.New("scanauftrag nicht gefunden")
 	}
 
-	// Es wird eine Kopie zurückgegeben, damit der interne
-	// Zustand nicht ausserhalb des Services verändert werden kann.
-	copy := *job
-	return &copy, nil
+	jobCopy := *job
+
+	return &jobCopy, nil
 }
 
-// runScan führt den Scan aus und aktualisiert danach den Status.
+// worker wartet auf Scanaufträge und verarbeitet diese nacheinander.
+// Da zwei Worker gestartet werden, laufen maximal zwei Scans parallel.
+func (s *ScanService) worker() {
+	for id := range s.queue {
+		s.runScan(id)
+	}
+}
+
+// runScan führt den zugewiesenen Scan aus und aktualisiert
+// anschliessend den Status und das Ergebnis.
 func (s *ScanService) runScan(id string) {
-	s.updateStatus(id, model.ScanStatusRunning, "", "")
-
-	// Ein Timeout verhindert unbegrenzt laufende Scanprozesse.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
 	s.mu.RLock()
-	target := s.jobs[id].Target
-	s.mu.RUnlock()
 
-	output, err := s.executor.Run(ctx, target)
-	if err != nil {
-		s.updateStatus(id, model.ScanStatusFailed, "", err.Error())
+	job, ok := s.jobs[id]
+	if !ok {
+		s.mu.RUnlock()
 		return
 	}
 
-	s.updateStatus(id, model.ScanStatusCompleted, string(output), "")
+	target := job.Target
+
+	s.mu.RUnlock()
+
+	// Der Status wechselt erst dann auf running,
+	// wenn ein Worker tatsächlich mit der Ausführung beginnt.
+	s.updateStatus(id, model.ScanStatusRunning, "", "")
+
+	// Ein Timeout begrenzt die maximale Laufzeit von Nmap.
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		2*time.Minute,
+	)
+	defer cancel()
+
+	output, err := s.executor.Run(ctx, target)
+
+	if err != nil {
+		s.updateStatus(
+			id,
+			model.ScanStatusFailed,
+			"",
+			err.Error(),
+		)
+		return
+	}
+
+	s.updateStatus(
+		id,
+		model.ScanStatusCompleted,
+		string(output),
+		"",
+	)
 }
 
 // updateStatus aktualisiert einen Scanauftrag threadsicher.
+// Gleichzeitig laufende API-Anfragen können dadurch
+// keine unkontrollierten Änderungen verursachen.
 func (s *ScanService) updateStatus(
 	id string,
 	status model.ScanStatus,
@@ -125,7 +188,7 @@ func (s *ScanService) updateStatus(
 	job.UpdatedAt = time.Now()
 }
 
-// generateID erzeugt eine zufällige ID für einen Scanauftrag.
+// generateID erzeugt eine zufällige ID für jeden Scanauftrag.
 func generateID() (string, error) {
 	value := make([]byte, 8)
 
