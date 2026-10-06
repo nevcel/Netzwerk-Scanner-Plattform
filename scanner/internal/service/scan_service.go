@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"log"
 	"sync"
 	"time"
 
@@ -18,6 +19,15 @@ const (
 
 	// Die Warteschlange nimmt maximal 100 zusätzliche Aufträge auf.
 	maxQueuedScans = 100
+)
+
+var (
+	// ErrQueueFull erlaubt dem HTTP-Controller, eine volle
+	// Warteschlange von einem ungültigen Scanziel zu unterscheiden.
+	ErrQueueFull = errors.New("scan-warteschlange ist voll")
+
+	// ErrScanNotFound wird bei einer unbekannten Scan-ID verwendet.
+	ErrScanNotFound = errors.New("scanauftrag nicht gefunden")
 )
 
 // ScanService verwaltet die Scanaufträge und koordiniert
@@ -34,7 +44,7 @@ type ScanService struct {
 }
 
 // NewScanService erstellt den ScanService und startet
-// die beiden Worker für die asynchrone Verarbeitung.
+// die Worker für die asynchrone Verarbeitung.
 func NewScanService(executor *nmap.Executor) *ScanService {
 	s := &ScanService{
 		executor: executor,
@@ -91,19 +101,18 @@ func (s *ScanService) CreateScan(target string) (*model.ScanJob, error) {
 		delete(s.jobs, id)
 		s.mu.Unlock()
 
-		return nil, errors.New("scan-warteschlange ist voll")
+		return nil, ErrQueueFull
 	}
 }
 
 // GetScan liefert eine Kopie des aktuellen Scanauftrags.
-// Dadurch bleibt der interne Zustand des Services geschützt.
 func (s *ScanService) GetScan(id string) (*model.ScanJob, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	job, ok := s.jobs[id]
 	if !ok {
-		return nil, errors.New("scanauftrag nicht gefunden")
+		return nil, ErrScanNotFound
 	}
 
 	jobCopy := *job
@@ -134,7 +143,7 @@ func (s *ScanService) runScan(id string) {
 
 	s.mu.RUnlock()
 
-	// Der Status wechselt erst dann auf running,
+	// Der Status wechselt erst auf running,
 	// wenn ein Worker tatsächlich mit der Ausführung beginnt.
 	s.updateStatus(id, model.ScanStatusRunning, "", "")
 
@@ -148,6 +157,13 @@ func (s *ScanService) runScan(id string) {
 	output, err := s.executor.Run(ctx, target)
 
 	if err != nil {
+		log.Printf(
+			"Scan %s für Ziel %s fehlgeschlagen: %v",
+			id,
+			target,
+			err,
+		)
+
 		s.updateStatus(
 			id,
 			model.ScanStatusFailed,
@@ -166,8 +182,6 @@ func (s *ScanService) runScan(id string) {
 }
 
 // updateStatus aktualisiert einen Scanauftrag threadsicher.
-// Gleichzeitig laufende API-Anfragen können dadurch
-// keine unkontrollierten Änderungen verursachen.
 func (s *ScanService) updateStatus(
 	id string,
 	status model.ScanStatus,

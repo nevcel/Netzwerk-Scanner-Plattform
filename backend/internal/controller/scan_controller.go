@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"network-scanner/backend/internal/model"
@@ -9,21 +10,16 @@ import (
 )
 
 // ScanController verarbeitet die Scan-Anfragen des Clients.
-// Die eigentliche Geschäftslogik wird über den ScanService ausgeführt.
 type ScanController struct {
 	scanService *service.ScanService
 }
 
-// NewScanController erstellt einen neuen Controller
-// für das Starten und Abfragen von Scanaufträgen.
 func NewScanController(scanService *service.ScanService) *ScanController {
 	return &ScanController{
 		scanService: scanService,
 	}
 }
 
-// CreateScan nimmt ein Scan-Ziel entgegen und
-// übergibt den Auftrag an den ScanService.
 func (c *ScanController) CreateScan(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -33,30 +29,54 @@ func (c *ScanController) CreateScan(w http.ResponseWriter, r *http.Request) {
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(&request); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"error": "ungültige JSON-Anfrage",
-		})
+		writeJSONError(
+			w,
+			http.StatusBadRequest,
+			"ungültige JSON-Anfrage",
+		)
 		return
 	}
 
 	job, err := c.scanService.CreateScan(r.Context(), request.Target)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"error": err.Error(),
-		})
+
+		switch {
+		case errors.Is(err, service.ErrInvalidTarget):
+			writeJSONError(
+				w,
+				http.StatusBadRequest,
+				err.Error(),
+			)
+
+		case errors.Is(err, service.ErrScannerBusy):
+			writeJSONError(
+				w,
+				http.StatusServiceUnavailable,
+				"scanner ist momentan ausgelastet",
+			)
+
+		case errors.Is(err, service.ErrScannerUnavailable):
+			writeJSONError(
+				w,
+				http.StatusServiceUnavailable,
+				"scanner-komponente ist momentan nicht erreichbar",
+			)
+
+		default:
+			writeJSONError(
+				w,
+				http.StatusInternalServerError,
+				"scanauftrag konnte nicht erstellt werden",
+			)
+		}
+
 		return
 	}
 
-	// HTTP 202 zeigt an, dass der Scanauftrag angenommen
-	// und im Hintergrund verarbeitet wird.
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(job)
 }
 
-// GetScan liefert den aktuellen Zustand
-// eines bereits gestarteten Scanauftrags.
 func (c *ScanController) GetScan(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -64,18 +84,18 @@ func (c *ScanController) GetScan(w http.ResponseWriter, r *http.Request) {
 
 	job, err := c.scanService.GetScan(r.Context(), id)
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"error": "scanauftrag nicht gefunden",
-		})
+		writeJSONError(
+			w,
+			http.StatusNotFound,
+			"scanauftrag nicht gefunden",
+		)
 		return
 	}
 
+	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(job)
 }
 
-// GetResults liefert die strukturierten Scanergebnisse als JSON.
-// Das Frontend muss dadurch keine Nmap-XML-Daten selbst verarbeiten.
 func (c *ScanController) GetResults(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -83,35 +103,43 @@ func (c *ScanController) GetResults(w http.ResponseWriter, r *http.Request) {
 
 	result, err := c.scanService.GetResults(r.Context(), id)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"error": "scanergebnisse konnten nicht geladen werden",
-		})
+		writeJSONError(
+			w,
+			http.StatusInternalServerError,
+			"scanergebnisse konnten nicht geladen werden",
+		)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-
 	_ = json.NewEncoder(w).Encode(result)
 }
 
-// GetHistory stellt die gespeicherten Scanläufe als JSON bereit.
-// Die Historie wird später in der Weboberfläche angezeigt.
 func (c *ScanController) GetHistory(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	history, err := c.scanService.GetHistory(r.Context())
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"error": "scan-historie konnte nicht geladen werden",
-		})
+		writeJSONError(
+			w,
+			http.StatusInternalServerError,
+			"scan-historie konnte nicht geladen werden",
+		)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-
 	_ = json.NewEncoder(w).Encode(history)
+}
+
+func writeJSONError(
+	w http.ResponseWriter,
+	status int,
+	message string,
+) {
+	w.WriteHeader(status)
+
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error": message,
+	})
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -9,6 +10,8 @@ import (
 	"network-scanner/backend/internal/nmapxml"
 	"network-scanner/backend/internal/repository"
 )
+
+const interruptedScanMessage = "Scan wurde abgebrochen, da die Scanner-Komponente neu gestartet wurde."
 
 // ScanService koordiniert die Kommunikation mit dem Scanner
 // und die dauerhafte Speicherung der Scanaufträge.
@@ -61,8 +64,18 @@ func (s *ScanService) GetScan(
 	job, err := s.scanner.GetScan(ctx, id)
 
 	if err != nil {
-		// Ist der Scanner nicht erreichbar, wird versucht,
-		// den zuletzt gespeicherten Zustand zurückzugeben.
+		// Ist der Scanner erreichbar, kennt den Auftrag aber nicht mehr,
+		// wird ein zuvor offener Scan kontrolliert als fehlgeschlagen markiert.
+		if errors.Is(err, ErrScanNotFound) {
+			return s.markScanAsFailed(
+				ctx,
+				id,
+				interruptedScanMessage,
+			)
+		}
+
+		// Bei einem vorübergehenden Kommunikationsproblem wird der
+		// zuletzt bekannte Zustand aus PostgreSQL zurückgegeben.
 		return s.repository.GetByScanID(ctx, id)
 	}
 
@@ -113,12 +126,10 @@ func (s *ScanService) GetHistory(
 	return s.repository.GetHistory(ctx)
 }
 
-// SyncActiveScans gleicht offene Scanaufträge mit der Scanner-Komponente ab.
-// Die Funktion wird später regelmässig durch einen Hintergrundprozess aufgerufen.
-// Dadurch bleiben Status und Ergebnisse auch ohne geöffnete Weboberfläche aktuell.
+// SyncActiveScans gleicht offene Scanaufträge regelmässig
+// mit der Scanner-Komponente ab.
 func (s *ScanService) SyncActiveScans(ctx context.Context) error {
 
-	// Alle noch offenen Scanaufträge aus PostgreSQL lesen.
 	scanIDs, err := s.repository.GetActiveScanIDs(ctx)
 	if err != nil {
 		return fmt.Errorf(
@@ -127,17 +138,47 @@ func (s *ScanService) SyncActiveScans(ctx context.Context) error {
 		)
 	}
 
-	// Jeder Auftrag wird einzeln mit dem Scanner abgeglichen.
 	for _, id := range scanIDs {
 
-		// Falls das Backend beendet wird, soll auch die
-		// laufende Synchronisierung kontrolliert enden.
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
 		job, err := s.scanner.GetScan(ctx, id)
 		if err != nil {
+
+			// Antwortet der Scanner mit 404, ist er erreichbar,
+			// kennt den zuvor gespeicherten Auftrag aber nicht mehr.
+			// Ein solcher Auftrag darf nicht dauerhaft auf pending
+			// oder running stehen bleiben.
+			if errors.Is(err, ErrScanNotFound) {
+
+				failedJob, failErr := s.markScanAsFailed(
+					ctx,
+					id,
+					interruptedScanMessage,
+				)
+				if failErr != nil {
+					log.Printf(
+						"Scan %s konnte nicht als fehlgeschlagen gespeichert werden: %v",
+						id,
+						failErr,
+					)
+					continue
+				}
+
+				log.Printf(
+					"Scan %s automatisch auf %s gesetzt: Scanner kennt Auftrag nicht mehr",
+					id,
+					failedJob.Status,
+				)
+
+				continue
+			}
+
+			// Bei einem normalen Kommunikationsproblem bleibt der
+			// aktuelle Datenbankstatus bestehen. Beim nächsten
+			// Synchronisierungslauf wird erneut geprüft.
 			log.Printf(
 				"Scan %s konnte nicht synchronisiert werden: %v",
 				id,
@@ -148,8 +189,6 @@ func (s *ScanService) SyncActiveScans(ctx context.Context) error {
 
 		var details *nmapxml.ScanResult
 
-		// Abgeschlossene Scanergebnisse werden strukturiert
-		// ausgewertet, bevor sie in PostgreSQL gespeichert werden.
 		if job.Status == "completed" {
 
 			details, err = nmapxml.Parse([]byte(job.Output))
@@ -163,8 +202,6 @@ func (s *ScanService) SyncActiveScans(ctx context.Context) error {
 			}
 		}
 
-		// Status und gegebenenfalls Hosts, Ports und Dienste
-		// werden über die bestehende Repository-Funktion gespeichert.
 		if err := s.repository.Update(ctx, job, details); err != nil {
 			log.Printf(
 				"Speicherung von Scan %s fehlgeschlagen: %v",
@@ -184,4 +221,40 @@ func (s *ScanService) SyncActiveScans(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// markScanAsFailed übernimmt einen noch offenen Scanauftrag aus PostgreSQL
+// und setzt ihn kontrolliert auf failed. Bereits abgeschlossene Aufträge
+// werden nicht nachträglich verändert.
+func (s *ScanService) markScanAsFailed(
+	ctx context.Context,
+	id string,
+	message string,
+) (*model.ScanJob, error) {
+
+	job, err := s.repository.GetByScanID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"scanauftrag konnte nicht aus PostgreSQL geladen werden: %w",
+			err,
+		)
+	}
+
+	// Ein bereits endgültig abgeschlossener Datensatz darf nicht
+	// durch einen späteren Synchronisierungslauf überschrieben werden.
+	if job.Status == "completed" || job.Status == "failed" {
+		return job, nil
+	}
+
+	job.Status = "failed"
+	job.Error = message
+
+	if err := s.repository.Update(ctx, job, nil); err != nil {
+		return nil, fmt.Errorf(
+			"fehlgeschlagener scanstatus konnte nicht gespeichert werden: %w",
+			err,
+		)
+	}
+
+	return job, nil
 }
