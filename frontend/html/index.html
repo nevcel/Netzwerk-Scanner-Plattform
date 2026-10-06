@@ -7,93 +7,214 @@
 
     <title>Netzwerk-Scanner</title>
 
-    <!-- Gestaltung und Anwendungslogik werden getrennt eingebunden. -->
     <link rel="stylesheet" href="/css/style.css">
-    <script src="/js/app.js" defer></script>
+    <script src="/js/app.js?v=2.0" defer></script>
 </head>
 
 <body>
+    <div class="app-shell">
 
-    <header>
-        <h1>Netzwerk-Scanner</h1>
-        <p>Netzwerkanalyse und Geräteübersicht</p>
-    </header>
+        <header class="topbar">
+            <div class="brand">
+                <div class="brand-logo" aria-hidden="true"></div>
 
-    <main>
+                <div>
+                    <h1>Netzwerk-Scanner</h1>
+                    <p>Lokale Netzwerke sicher analysieren</p>
+                </div>
+            </div>
 
-        <!-- Eingabe und Start eines neuen Scanauftrags. -->
-        <section id="scan-section">
+            <div class="topbar-badges">
+                <span class="topbar-badge topbar-badge--active">
+                    Lokaler Betrieb
+                </span>
 
-            <h2>Neuen Scan starten</h2>
+                <span class="topbar-badge">
+                    IPv4 / CIDR
+                </span>
+            </div>
+        </header>
 
-            <form id="scan-form">
+        <main>
 
-                <label for="scan-target">
-                    IP-Adresse oder Netzwerk
-                </label>
+            <div class="dashboard-top">
 
-                <input
-                    type="text"
-                    id="scan-target"
-                    name="target"
-                    placeholder="192.168.1.0/24"
-                    required
-                >
+                <section id="scan-section" class="card hero-card">
 
-                <button type="submit" id="scan-button">
-                    Scan starten
-                </button>
+                    <p class="eyebrow">
+                        Network Discovery
+                    </p>
 
-            </form>
+                    <h2>
+                        Einfach sehen, was in deinem Netzwerk erreichbar ist.
+                    </h2>
 
-            <p>
-                Es dürfen ausschliesslich autorisierte
-                lokale Netzwerke gescannt werden.
-            </p>
+                    <p class="hero-description">
+                        Scanne private IPv4-Adressen oder lokale Netzwerke
+                        und erhalte eine klare Übersicht zu Hosts, Ports
+                        und erkannten Diensten.
+                    </p>
 
-        </section>
+                    <form id="scan-form">
 
-        <!-- Anzeige des aktuellen Scanauftrags. -->
-        <section id="status-section" hidden>
+                        <label for="scan-target" class="visually-hidden">
+                            IP-Adresse oder Netzwerk
+                        </label>
 
-            <h2>Scanstatus</h2>
+                        <div class="scan-box">
 
-            <p>Scan-ID: <span id="scan-id">–</span></p>
-            <p>Scanziel: <span id="scan-target-display">–</span></p>
-            <p>Status: <span id="scan-status">–</span></p>
+                            <input type="text" id="scan-target" name="target" placeholder="z. B. 192.168.1.0/24"
+                                autocomplete="off" required>
 
-            <p id="scan-message" role="status" aria-live="polite"></p>
+                            <button type="submit" id="scan-button" class="primary-button">
+                                Scan starten
+                            </button>
 
-        </section>
+                        </div>
+                    </form>
 
-        <!-- Darstellung der strukturierten Scanergebnisse. -->
-        <section id="results-section" hidden>
+                    <div class="security-hint">
 
-            <h2>Scanergebnisse</h2>
+                        <span class="security-dot" aria-hidden="true"></span>
 
-            <div id="results-container"></div>
+                        <span>
+                            Nur eigene oder ausdrücklich autorisierte
+                            Netzwerke scannen.
+                        </span>
 
-        </section>
+                    </div>
 
-        <!-- Übersicht der gespeicherten Scanläufe. -->
-        <section id="history-section">
+                </section>
 
-            <h2>Scan-Historie</h2>
 
-            <button type="button" id="refresh-history">
-                Historie aktualisieren
-            </button>
+                <section id="status-section" class="card status-card">
 
-            <div id="history-container"></div>
+                    <div class="card-heading">
 
-        </section>
+                        <div>
+                            <h2>Aktueller Scan</h2>
 
-    </main>
+                            <p>
+                                Live-Status des ausgewählten Auftrags
+                            </p>
+                        </div>
 
-    <footer>
-        <p>Netzwerk-Scanner | HF-Diplomarbeit 2026</p>
-    </footer>
+                        <span id="scan-status" class="status-badge" data-status="idle">
+                            BEREIT
+                        </span>
 
+                    </div>
+
+
+                    <div class="progress-track" aria-hidden="true">
+                        <span id="scan-progress-bar" class="progress-bar"></span>
+                    </div>
+
+
+                    <div class="status-grid">
+
+                        <div class="status-item">
+
+                            <span>
+                                Scanziel
+                            </span>
+
+                            <strong id="scan-target-display">
+                                –
+                            </strong>
+
+                        </div>
+
+
+                        <div class="status-item">
+
+                            <span>
+                                Scan-ID
+                            </span>
+
+                            <strong id="scan-id" class="monospace">
+                                –
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="scan-message-box">
+
+                        <span class="message-indicator" aria-hidden="true"></span>
+
+                        <p id="scan-message" role="status" aria-live="polite">
+                            Noch kein Scan gestartet.
+                        </p>
+
+                    </div>
+
+                </section>
+
+            </div>
+
+
+
+
+            <div class="dashboard-content">
+
+                <section id="results-section" class="card results-card" hidden>
+
+                    <div class="section-heading">
+
+                        <div>
+                            <h2>Scanergebnisse</h2>
+                            <p>Erkannte Hosts und offene Netzwerkdienste</p>
+                        </div>
+
+                        <button type="button" id="close-results" class="secondary-button">
+                            Schliessen
+                        </button>
+
+                    </div>
+
+                    <div id="results-container"></div>
+
+                </section>
+
+
+                <section id="history-section" class="card history-card">
+
+                    <div class="section-heading">
+
+                        <div>
+                            <h2>
+                                Scan-Historie
+                            </h2>
+
+                            <p>
+                                Zuletzt ausgeführte und gespeicherte
+                                Netzwerk-Scans
+                            </p>
+                        </div>
+
+                        <button type="button" id="refresh-history" class="secondary-button">
+                            Aktualisieren
+                        </button>
+
+                    </div>
+
+                    <div id="history-container"></div>
+
+                </section>
+
+            </div>
+
+        </main>
+
+
+        <footer>
+            Netzwerk-Scanner · HF-Diplomarbeit 2026
+        </footer>
+
+    </div>
 </body>
 
 </html>

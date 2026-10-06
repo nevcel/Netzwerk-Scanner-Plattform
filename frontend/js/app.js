@@ -1,11 +1,8 @@
 "use strict";
 
 
-// Netzwerk-Scanner – Anwendungslogik
-// Kommunikation mit dem Go-Backend über die Nginx-Weiterleitung.
+// HTML-Elemente
 
-
-// Zentrale Referenzen auf die benötigten HTML-Elemente.
 const scanForm = document.getElementById("scan-form");
 const scanTarget = document.getElementById("scan-target");
 const scanButton = document.getElementById("scan-button");
@@ -15,405 +12,940 @@ const scanIdDisplay = document.getElementById("scan-id");
 const scanTargetDisplay = document.getElementById("scan-target-display");
 const scanStatusDisplay = document.getElementById("scan-status");
 const scanMessage = document.getElementById("scan-message");
+const scanProgressBar = document.getElementById("scan-progress-bar");
 
 const resultsSection = document.getElementById("results-section");
 const resultsContainer = document.getElementById("results-container");
+const closeResultsButton = document.getElementById("close-results");
 
 const historyContainer = document.getElementById("history-container");
 const refreshHistoryButton = document.getElementById("refresh-history");
 
-// Die aktuell angezeigte Scan-ID bestimmt, welcher Auftrag
-// im Status- und Ergebnisbereich dargestellt wird.
+
+
+// Aktuell ausgewählter Scan
+
 let activeScanId = null;
 
-// Mehrere Scanaufträge können gleichzeitig überwacht werden.
-// Das Set verhindert doppelte Statusabfragen für denselben Auftrag.
+
+// Verhindert doppelte Statusabfragen für denselben Scan
+
 const monitoredScans = new Set();
+
+
+// Abstand zwischen den Statusabfragen
 
 const POLLING_INTERVAL = 2000;
 
 
-
 // REST-Kommunikation
 
-
-// apiRequest übernimmt die gemeinsamen HTTP-Anfragen.
-// Bei einer fehlgeschlagenen Anfrage wird eine Fehlermeldung ausgelöst.
 async function apiRequest(path, options = {}) {
-    const response = await fetch(path, options);
 
-    const data = await response.json().catch(() => null);
+    const response = await fetch(
+        path,
+        options
+    );
+
+    const data =
+        await response
+            .json()
+            .catch(() => null);
 
     if (!response.ok) {
+
         throw new Error(
-            data?.error || `HTTP-Fehler ${response.status}`
+            data?.error ||
+            `HTTP-Fehler ${response.status}`
         );
+
     }
 
     return data;
 }
 
 
-
 // Scan starten
 
+scanForm.addEventListener(
+    "submit",
+    async (event) => {
 
-scanForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
+        event.preventDefault();
 
-    const target = scanTarget.value.trim();
+        const target =
+            scanTarget
+                .value
+                .trim();
 
-    if (!target) {
-        showMessage("Bitte eine IP-Adresse oder ein Netzwerk eingeben.");
-        return;
+        if (!target) {
+
+            showMessage(
+                "Bitte eine IP-Adresse oder ein Netzwerk eingeben."
+            );
+
+            return;
+        }
+
+
+        scanButton.disabled = true;
+
+        scanButton.textContent =
+            "Scan wird gestartet ...";
+
+
+        resultsSection.hidden = true;
+
+        resultsContainer.replaceChildren();
+
+
+        showMessage(
+            "Scanauftrag wird übermittelt."
+        );
+
+
+        try {
+
+            const job = await apiRequest(
+                "/api/scans",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        target: target
+                    })
+                }
+            );
+
+
+            activeScanId = job.id;
+
+
+            displayScanStatus(job);
+
+
+            void monitorScan(job.id);
+
+
+        } catch (error) {
+
+            setStatusVisual("failed");
+
+            showMessage(
+                `Fehler: ${error.message}`
+            );
+
+
+        } finally {
+
+            scanButton.disabled = false;
+
+            scanButton.textContent =
+                "Scan starten";
+
+        }
     }
-
-    // Während der Erstellung soll kein zweiter Auftrag
-    // über denselben Button ausgelöst werden.
-    scanButton.disabled = true;
-    scanButton.textContent = "Scan wird gestartet ...";
-
-    resultsSection.hidden = true;
-    resultsContainer.replaceChildren();
-
-    showMessage("Scanauftrag wird übermittelt.");
-
-    try {
-        const job = await apiRequest("/api/scans", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                target: target
-            })
-        });
-
-        activeScanId = job.id;
-
-        displayScanStatus(job);
-
-        // Die Statusüberwachung läuft unabhängig vom Formular weiter.
-        // Dadurch kann der Benutzer direkt einen weiteren Scan starten.
-        void monitorScan(job.id);
-
-    } catch (error) {
-        showMessage(`Fehler: ${error.message}`);
-
-    } finally {
-        scanButton.disabled = false;
-        scanButton.textContent = "Scan starten";
-    }
-});
+);
 
 
+// Scanstatus überwachen
 
-// Asynchrone Statusüberwachung
-
-
-// Jeder Scanauftrag wird unabhängig von den anderen überwacht.
-// Nur der aktuell ausgewählte Scan aktualisiert die Statusanzeige.
 async function monitorScan(scanId) {
+
     if (monitoredScans.has(scanId)) {
         return;
     }
 
+
     monitoredScans.add(scanId);
 
-    try {
-        while (true) {
-            await new Promise((resolve) => {
-                setTimeout(resolve, POLLING_INTERVAL);
-            });
 
-            const job = await apiRequest(
-                `/api/scans/${encodeURIComponent(scanId)}`
+    try {
+
+        while (true) {
+
+            await new Promise(
+                (resolve) => {
+
+                    setTimeout(
+                        resolve,
+                        POLLING_INTERVAL
+                    );
+
+                }
             );
 
-            // Ein Scan im Hintergrund darf die Anzeige eines
-            // inzwischen ausgewählten anderen Scans nicht überschreiben.
+
+            const job =
+                await apiRequest(
+                    `/api/scans/${encodeURIComponent(scanId)}`
+                );
+
+
             if (activeScanId === scanId) {
+
                 displayScanStatus(job);
+
             }
+
 
             if (job.status === "completed") {
+
                 if (activeScanId === scanId) {
-                    showMessage("Scan erfolgreich abgeschlossen.");
-                    await loadScanResults(scanId);
+
+                    showMessage(
+                        "Scan erfolgreich abgeschlossen."
+                    );
+
+                    await loadScanResults(
+                        scanId
+                    );
+
                 }
 
-                // Auch abgeschlossene Hintergrundscans
-                // sollen in der Historie sichtbar werden.
+
                 await loadHistory();
 
                 return;
             }
+
 
             if (job.status === "failed") {
+
                 if (activeScanId === scanId) {
+
                     showMessage(
-                        job.error || "Der Scan konnte nicht abgeschlossen werden."
+                        job.error ||
+                        "Der Scan konnte nicht abgeschlossen werden."
                     );
+
                 }
+
 
                 await loadHistory();
 
                 return;
             }
+
         }
+
 
     } catch (error) {
+
         if (activeScanId === scanId) {
-            showMessage(`Fehler: ${error.message}`);
+
+            setStatusVisual("failed");
+
+            showMessage(
+                `Fehler: ${error.message}`
+            );
+
         }
 
+
     } finally {
+
         monitoredScans.delete(scanId);
+
     }
 }
 
 
-
-// Statusanzeige
-
+// Scanstatus anzeigen
 
 function displayScanStatus(job) {
-    statusSection.hidden = false;
 
-    scanIdDisplay.textContent = job.id;
-    scanTargetDisplay.textContent = job.target;
-    scanStatusDisplay.textContent = job.status;
+    scanIdDisplay.textContent =
+        job.id;
+
+    scanTargetDisplay.textContent =
+        job.target;
+
+
+    setStatusVisual(
+        job.status
+    );
+
 
     const messages = {
-        pending: "Scanauftrag wurde angenommen.",
-        running: "Netzwerk wird analysiert ...",
-        completed: "Scan abgeschlossen.",
-        failed: "Beim Scan ist ein Fehler aufgetreten."
+
+        pending:
+            "Scanauftrag wurde angenommen und wartet auf einen freien Worker.",
+
+        running:
+            "Netzwerk wird analysiert ...",
+
+        completed:
+            "Scan abgeschlossen.",
+
+        failed:
+            "Beim Scan ist ein Fehler aufgetreten."
+
     };
 
-    showMessage(messages[job.status] || job.status);
+
+    showMessage(
+        messages[job.status] ||
+        job.status
+    );
+
 }
+
+
+// Status optisch darstellen
+
+function setStatusVisual(status) {
+
+    const labels = {
+
+        idle:
+            "BEREIT",
+
+        pending:
+            "WARTEND",
+
+        running:
+            "LÄUFT",
+
+        completed:
+            "ABGESCHLOSSEN",
+
+        failed:
+            "FEHLER"
+
+    };
+
+
+    const progress = {
+
+        idle:
+            "0%",
+
+        pending:
+            "25%",
+
+        running:
+            "72%",
+
+        completed:
+            "100%",
+
+        failed:
+            "100%"
+
+    };
+
+
+    scanStatusDisplay.textContent =
+        labels[status] ||
+        status.toUpperCase();
+
+
+    scanStatusDisplay.dataset.status =
+        status;
+
+
+    scanProgressBar.style.width =
+        progress[status] ||
+        "0%";
+
+}
+
+
+// Rückmeldung anzeigen
 
 function showMessage(message) {
+
     statusSection.hidden = false;
-    scanMessage.textContent = message;
+
+    scanMessage.textContent =
+        message;
+
 }
 
 
+// Scanergebnisse laden
 
-// Strukturierte Scanergebnisse darstellen
-
-
-// Die Ergebnisse werden ausschliesslich über die REST-API
-// geladen. Das Frontend verarbeitet kein Nmap-XML.
 async function loadScanResults(scanId) {
-    const result = await apiRequest(
-        `/api/scans/${encodeURIComponent(scanId)}/results`
-    );
+
+    const result =
+        await apiRequest(
+            `/api/scans/${encodeURIComponent(scanId)}/results`
+        );
+
 
     if (activeScanId !== scanId) {
         return;
     }
 
+
     resultsContainer.replaceChildren();
+
     resultsSection.hidden = false;
 
-    if (!result.hosts || result.hosts.length === 0) {
-        const message = document.createElement("p");
-        message.textContent = "Keine Hosts im Scanergebnis vorhanden.";
 
-        resultsContainer.appendChild(message);
+    if (
+        !result.hosts ||
+        result.hosts.length === 0
+    ) {
+
+        const message =
+            document.createElement("div");
+
+
+        message.className =
+            "empty-state";
+
+
+        message.textContent =
+            "Keine Hosts im Scanergebnis vorhanden.";
+
+
+        resultsContainer.appendChild(
+            message
+        );
+
         return;
     }
 
-    // Jeder Host wird als eigener Ergebnisbereich aufgebaut.
+
     for (const host of result.hosts) {
-        const hostArticle = document.createElement("article");
-        hostArticle.className = "result-host";
 
-        const heading = document.createElement("h3");
-        heading.textContent = host.ip_address;
+        const hostArticle =
+            document.createElement(
+                "article"
+            );
 
-        const information = document.createElement("p");
+
+        hostArticle.className =
+            "result-host";
+
+
+        const heading =
+            document.createElement(
+                "h3"
+            );
+
+
+        heading.textContent =
+            host.ip_address;
+
+
+        const information =
+            document.createElement(
+                "p"
+            );
+
+
         information.textContent =
-            `Hostname: ${host.hostname || "–"} | Status: ${host.state}`;
+            `Hostname: ${host.hostname || "–"} · Status: ${host.state}`;
 
-        hostArticle.append(heading, information);
 
-        if (!host.ports || host.ports.length === 0) {
-            const message = document.createElement("p");
-            message.textContent = "Keine Ports erfasst.";
+        hostArticle.append(
+            heading,
+            information
+        );
 
-            hostArticle.appendChild(message);
+
+        if (
+            !host.ports ||
+            host.ports.length === 0
+        ) {
+
+            const message =
+                document.createElement(
+                    "p"
+                );
+
+
+            message.textContent =
+                "Keine Ports erfasst.";
+
+
+            hostArticle.appendChild(
+                message
+            );
+
 
         } else {
-            const table = document.createElement("table");
 
-            const header = document.createElement("thead");
-            const headerRow = document.createElement("tr");
+            const table =
+                document.createElement(
+                    "table"
+                );
+
+
+            const header =
+                document.createElement(
+                    "thead"
+                );
+
+
+            const headerRow =
+                document.createElement(
+                    "tr"
+                );
+
 
             for (const label of [
+
                 "Port",
                 "Protokoll",
                 "Status",
                 "Dienst",
                 "Produkt",
                 "Version"
+
             ]) {
-                const cell = document.createElement("th");
-                cell.textContent = label;
-                headerRow.appendChild(cell);
+
+                const cell =
+                    document.createElement(
+                        "th"
+                    );
+
+
+                cell.textContent =
+                    label;
+
+
+                headerRow.appendChild(
+                    cell
+                );
+
             }
 
-            header.appendChild(headerRow);
 
-            const body = document.createElement("tbody");
+            header.appendChild(
+                headerRow
+            );
+
+
+            const body =
+                document.createElement(
+                    "tbody"
+                );
+
 
             for (const port of host.ports) {
-                const row = document.createElement("tr");
+
+                const row =
+                    document.createElement(
+                        "tr"
+                    );
+
 
                 const values = [
+
                     port.number,
+
                     port.protocol,
+
                     port.state,
-                    port.service?.name || "–",
-                    port.service?.product || "–",
-                    port.service?.version || "–"
+
+                    port.service?.name ||
+                        "–",
+
+                    port.service?.product ||
+                        "–",
+
+                    port.service?.version ||
+                        "–"
+
                 ];
 
+
                 for (const value of values) {
-                    const cell = document.createElement("td");
 
-                    // textContent verhindert, dass erkannte Hostnamen
-                    // oder Diensteinträge als HTML interpretiert werden.
-                    cell.textContent = value;
+                    const cell =
+                        document.createElement(
+                            "td"
+                        );
 
-                    row.appendChild(cell);
+
+                    cell.textContent =
+                        value;
+
+
+                    row.appendChild(
+                        cell
+                    );
+
                 }
 
-                body.appendChild(row);
+
+                body.appendChild(
+                    row
+                );
+
             }
 
-            table.append(header, body);
-            hostArticle.appendChild(table);
+
+            table.append(
+                header,
+                body
+            );
+
+
+            hostArticle.appendChild(
+                table
+            );
+
         }
 
-        resultsContainer.appendChild(hostArticle);
+
+        resultsContainer.appendChild(
+            hostArticle
+        );
+
     }
+
 }
 
 
+// Scan-Historie laden
 
-// Scan-Historie
-
-
-// Die Historie wird aus PostgreSQL über das Backend geladen.
 async function loadHistory() {
+
     try {
-        const history = await apiRequest("/api/scans");
+
+        const history =
+            await apiRequest(
+                "/api/scans"
+            );
+
 
         historyContainer.replaceChildren();
 
-        if (!history.scans || history.scans.length === 0) {
-            const message = document.createElement("p");
-            message.textContent = "Noch keine Scanläufe vorhanden.";
 
-            historyContainer.appendChild(message);
+        if (
+            !history.scans ||
+            history.scans.length === 0
+        ) {
+
+            const message =
+                document.createElement(
+                    "div"
+                );
+
+
+            message.className =
+                "empty-state";
+
+
+            message.textContent =
+                "Noch keine Scanläufe vorhanden.";
+
+
+            historyContainer.appendChild(
+                message
+            );
+
             return;
         }
 
-        const table = document.createElement("table");
-        const header = document.createElement("thead");
-        const headerRow = document.createElement("tr");
 
-        for (const label of [
-            "Datum",
-            "Scanziel",
-            "Status",
-            "Hosts",
-            "Aktion"
-        ]) {
-            const cell = document.createElement("th");
-            cell.textContent = label;
-            headerRow.appendChild(cell);
-        }
+        const list =
+            document.createElement(
+                "div"
+            );
 
-        header.appendChild(headerRow);
 
-        const body = document.createElement("tbody");
+        list.className =
+            "history-list";
+
 
         for (const scan of history.scans) {
-            const row = document.createElement("tr");
 
-            const values = [
-                new Date(scan.created_at).toLocaleString("de-CH"),
-                scan.target,
-                scan.status,
-                scan.host_count
-            ];
+            const row =
+                document.createElement(
+                    "div"
+                );
 
-            for (const value of values) {
-                const cell = document.createElement("td");
-                cell.textContent = value;
-                row.appendChild(cell);
-            }
 
-            // Über den Button kann ein früherer Scan
-            // erneut aus der Datenbank geladen werden.
-            const actionCell = document.createElement("td");
-            const button = document.createElement("button");
+            row.className =
+                "history-row";
 
-            button.type = "button";
-            button.textContent = "Anzeigen";
 
-            button.addEventListener("click", async () => {
-                activeScanId = scan.id;
+            const target =
+                document.createElement(
+                    "div"
+                );
 
-                try {
-                    const job = await apiRequest(
-                        `/api/scans/${encodeURIComponent(scan.id)}`
+
+            target.className =
+                "history-target";
+
+
+            const targetValue =
+                document.createElement(
+                    "strong"
+                );
+
+
+            targetValue.textContent =
+                scan.target;
+
+
+            const targetMeta =
+                document.createElement(
+                    "span"
+                );
+
+
+            targetMeta.textContent =
+                `Scan-ID: ${scan.id}`;
+
+
+            target.append(
+                targetValue,
+                targetMeta
+            );
+
+
+            const date =
+                document.createElement(
+                    "div"
+                );
+
+
+            date.className =
+                "history-date";
+
+
+            date.textContent =
+                new Date(
+                    scan.created_at
+                )
+                    .toLocaleString(
+                        "de-CH"
                     );
 
-                    displayScanStatus(job);
 
-                    if (job.status === "completed") {
-                        await loadScanResults(scan.id);
+            const hosts =
+                document.createElement(
+                    "div"
+                );
 
-                    } else {
-                        resultsSection.hidden = true;
-                        resultsContainer.replaceChildren();
 
-                        if (job.status === "pending" || job.status === "running") {
-                            await monitorScan(scan.id);
+            hosts.className =
+                "history-hosts";
+
+
+            hosts.textContent =
+                `${scan.host_count ?? 0} Host${
+                    scan.host_count === 1
+                        ? ""
+                        : "s"
+                }`;
+
+
+            const status =
+                document.createElement(
+                    "div"
+                );
+
+
+            status.className =
+                "history-state";
+
+
+            status.dataset.status =
+                scan.status;
+
+
+            status.textContent =
+                formatStatus(
+                    scan.status
+                );
+
+
+            const button =
+                document.createElement(
+                    "button"
+                );
+
+
+            button.type =
+                "button";
+
+
+            button.className =
+                "history-action";
+
+
+            button.textContent =
+                "Anzeigen";
+
+
+            button.addEventListener(
+                "click",
+                async () => {
+
+                    activeScanId =
+                        scan.id;
+
+
+                    try {
+
+                        const job =
+                            await apiRequest(
+                                `/api/scans/${encodeURIComponent(scan.id)}`
+                            );
+
+
+                        displayScanStatus(
+                            job
+                        );
+
+
+                        if (
+                            job.status ===
+                            "completed"
+                        ) {
+
+                            await loadScanResults(
+                                scan.id
+                            );
+
+
+                        } else {
+
+                            resultsSection.hidden =
+                                true;
+
+
+                            resultsContainer
+                                .replaceChildren();
+
+
+                            if (
+                                job.status ===
+                                    "pending" ||
+                                job.status ===
+                                    "running"
+                            ) {
+
+                                void monitorScan(
+                                    scan.id
+                                );
+
+                            }
+
                         }
+
+
+                    } catch (error) {
+
+                        setStatusVisual(
+                            "failed"
+                        );
+
+
+                        showMessage(
+                            `Fehler: ${error.message}`
+                        );
+
                     }
 
-                } catch (error) {
-                    showMessage(`Fehler: ${error.message}`);
                 }
-            });
+            );
 
-            actionCell.appendChild(button);
-            row.appendChild(actionCell);
 
-            body.appendChild(row);
+            row.append(
+                target,
+                date,
+                hosts,
+                status,
+                button
+            );
+
+
+            list.appendChild(
+                row
+            );
+
         }
 
-        table.append(header, body);
-        historyContainer.appendChild(table);
+
+        historyContainer.appendChild(
+            list
+        );
+
 
     } catch (error) {
-        historyContainer.textContent =
+
+        const message =
+            document.createElement(
+                "div"
+            );
+
+
+        message.className =
+            "error-state";
+
+
+        message.textContent =
             `Historie konnte nicht geladen werden: ${error.message}`;
+
+
+        historyContainer.replaceChildren(
+            message
+        );
+
     }
+
 }
 
 
+// Status für Historie formatieren
 
-// Initialisierung
+function formatStatus(status) {
 
-// Beim Öffnen der Weboberfläche werden die bereits
-// gespeicherten Scanläufe automatisch angezeigt.
-refreshHistoryButton.addEventListener("click", loadHistory);
+    const labels = {
+
+        pending:
+            "WARTEND",
+
+        running:
+            "LÄUFT",
+
+        completed:
+            "ABGESCHLOSSEN",
+
+        failed:
+            "FEHLER"
+
+    };
+
+
+    return (
+        labels[status] ||
+        status.toUpperCase()
+    );
+
+}
+
+
+// Historie manuell aktualisieren
+
+refreshHistoryButton.addEventListener(
+    "click",
+    loadHistory
+);
+
+
+// Historie beim Laden der Seite anzeigen
 
 loadHistory();
+
+closeResultsButton.addEventListener(
+    "click",
+    () => {
+        resultsSection.hidden = true;
+    }
+);
