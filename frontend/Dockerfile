@@ -1,13 +1,13 @@
-# Nginx liefert die statischen Dateien unserer Weboberfläche aus.
-FROM nginx:1.27-alpine
+# Nginx wird ohne Root-Rechte ausgeführt.
+FROM nginxinc/nginx-unprivileged:stable-alpine
 
-# Eigene Nginx-Konfiguration für Frontend und API-Weiterleitung.
+# Konfiguration für die Weboberfläche und API-Weiterleitung.
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# HTML-, CSS- und JavaScript-Dateien werden getrennt verwaltet
-# und beim Image-Build in das öffentliche Webverzeichnis kopiert.
+# Statische Dateien der Benutzeroberfläche.
 COPY html/ /usr/share/nginx/html/
 COPY css/ /usr/share/nginx/html/css/
 COPY js/ /usr/share/nginx/html/js/
 
-EXPOSE 80
+# Interner Port des Nginx-Containers.
+EXPOSE 8080

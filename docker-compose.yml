@@ -31,7 +31,6 @@ services:
 
     restart: unless-stopped
 
-
   # Scanner-Komponente mit integrierter Nmap-Installation
   scanner:
     build:
@@ -49,6 +48,13 @@ services:
     # Der Scanner wird nach einem unerwarteten Abbruch neu gestartet.
     restart: unless-stopped
 
+    # Zusätzliche Absicherung des Containers.
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
     # Überprüfung der internen Scanner-API.
     healthcheck:
       test:
@@ -61,7 +67,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
 
   # Go-Backend mit REST-Schnittstelle
   backend:
@@ -98,8 +103,14 @@ services:
         condition: service_healthy
 
     restart: unless-stopped
-  
-   
+
+    # Zusätzliche Absicherung des Containers.
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
   # Weboberfläche und Weiterleitung der REST-Anfragen
 
   frontend:
@@ -110,15 +121,21 @@ services:
     image: network-scanner-frontend:dev
     container_name: network-scanner-frontend
 
-    # Die Weboberfläche ist lokal über Port 3000 erreichbar.
+    # Die Weboberfläche ist ausschliesslich lokal erreichbar.
     ports:
-      - "127.0.0.1:3000:80"
+      - "127.0.0.1:3000:8080"
 
     depends_on:
       - backend
 
     restart: unless-stopped
 
+    # Zusätzliche Einschränkung der Container-Rechte.
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
 
 # Persistente Datenspeicherung
 volumes:
