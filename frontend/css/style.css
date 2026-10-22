@@ -750,6 +750,11 @@ footer {
         box-shadow 150ms ease;
 }
 
+#close-results {
+    background: rgb(213, 94, 94);
+    color: white;
+}
+
 .secondary-button:hover {
     box-shadow: var(--shadow-soft);
 
@@ -1140,4 +1145,89 @@ footer {
         justify-self: stretch;
     }
 
+}
+
+/* Fortschrittsanzeige ohne künstliche Prozentwerte */
+
+#status-section[data-status="pending"] .progress-track {
+    background: repeating-linear-gradient(
+        -45deg,
+        #fff7e7 0,
+        #fff7e7 10px,
+        #ffeccc 10px,
+        #ffeccc 20px
+    );
+}
+
+#status-section[data-status="running"] .progress-bar {
+    width: 35%;
+
+    background: linear-gradient(
+        90deg,
+        var(--primary),
+        var(--cyan)
+    );
+
+    animation: scan-progress-running 1.7s ease-in-out infinite alternate;
+}
+
+#status-section[data-status="completed"] .progress-bar {
+    width: 100%;
+    background: var(--success);
+    animation: none;
+}
+
+#status-section[data-status="failed"] .progress-track {
+    background: var(--danger-soft);
+}
+
+#status-section[data-status="failed"] .progress-bar {
+    width: 0;
+    animation: none;
+}
+
+@keyframes scan-progress-running {
+    from {
+        transform: translateX(-110%);
+    }
+
+    to {
+        transform: translateX(290%);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #status-section[data-status="running"] .progress-bar {
+        width: 100%;
+        opacity: 0.35;
+        animation: none;
+    }
+}
+
+/* Rückmeldungen passend zum Scanstatus */
+
+#status-section[data-status="failed"] .scan-message-box {
+    background: var(--danger-soft);
+    border: 1px solid #f5c8cd;
+}
+
+#status-section[data-status="failed"] #scan-message {
+    color: #a63f49;
+}
+
+#status-section[data-status="failed"] .message-indicator {
+    background: var(--danger);
+}
+
+#status-section[data-status="completed"] .scan-message-box {
+    background: var(--success-soft);
+    border: 1px solid #d2efdf;
+}
+
+#status-section[data-status="completed"] #scan-message {
+    color: #177b50;
+}
+
+#status-section[data-status="completed"] .message-indicator {
+    background: var(--success);
 }

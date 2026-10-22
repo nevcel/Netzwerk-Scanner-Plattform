@@ -12,7 +12,7 @@ const scanIdDisplay = document.getElementById("scan-id");
 const scanTargetDisplay = document.getElementById("scan-target-display");
 const scanStatusDisplay = document.getElementById("scan-status");
 const scanMessage = document.getElementById("scan-message");
-const scanProgressBar = document.getElementById("scan-progress-bar");
+
 
 const resultsSection = document.getElementById("results-section");
 const resultsContainer = document.getElementById("results-container");
@@ -260,40 +260,21 @@ async function monitorScan(scanId) {
 
 function displayScanStatus(job) {
 
-    scanIdDisplay.textContent =
-        job.id;
+    scanIdDisplay.textContent = job.id;
+    scanTargetDisplay.textContent = job.target;
 
-    scanTargetDisplay.textContent =
-        job.target;
-
-
-    setStatusVisual(
-        job.status
-    );
-
+    setStatusVisual(job.status);
 
     const messages = {
-
-        pending:
-            "Scanauftrag wurde angenommen und wartet auf einen freien Worker.",
-
-        running:
-            "Netzwerk wird analysiert ...",
-
-        completed:
-            "Scan abgeschlossen.",
-
-        failed:
-            "Beim Scan ist ein Fehler aufgetreten."
-
+        pending: "Scanauftrag wurde angenommen und wartet auf einen freien Worker.",
+        running: "Netzwerk wird analysiert ...",
+        completed: "Scan erfolgreich abgeschlossen.",
+        failed: job.error || "Der Scan konnte nicht abgeschlossen werden."
     };
 
-
     showMessage(
-        messages[job.status] ||
-        job.status
+        messages[job.status] || "Unbekannter Scanstatus."
     );
-
 }
 
 
@@ -302,58 +283,19 @@ function displayScanStatus(job) {
 function setStatusVisual(status) {
 
     const labels = {
-
-        idle:
-            "BEREIT",
-
-        pending:
-            "WARTEND",
-
-        running:
-            "LÄUFT",
-
-        completed:
-            "ABGESCHLOSSEN",
-
-        failed:
-            "FEHLER"
-
+        idle: "BEREIT",
+        pending: "WARTEND",
+        running: "LÄUFT",
+        completed: "ABGESCHLOSSEN",
+        failed: "FEHLER"
     };
-
-
-    const progress = {
-
-        idle:
-            "0%",
-
-        pending:
-            "25%",
-
-        running:
-            "72%",
-
-        completed:
-            "100%",
-
-        failed:
-            "100%"
-
-    };
-
 
     scanStatusDisplay.textContent =
-        labels[status] ||
-        status.toUpperCase();
+        labels[status] || "UNBEKANNT";
 
+    scanStatusDisplay.dataset.status = status;
 
-    scanStatusDisplay.dataset.status =
-        status;
-
-
-    scanProgressBar.style.width =
-        progress[status] ||
-        "0%";
-
+    statusSection.dataset.status = status;
 }
 
 
@@ -548,13 +490,13 @@ async function loadScanResults(scanId) {
                     port.state,
 
                     port.service?.name ||
-                        "–",
+                    "–",
 
                     port.service?.product ||
-                        "–",
+                    "–",
 
                     port.service?.version ||
-                        "–"
+                    "–"
 
                 ];
 
@@ -737,10 +679,9 @@ async function loadHistory() {
 
 
             hosts.textContent =
-                `${scan.host_count ?? 0} Host${
-                    scan.host_count === 1
-                        ? ""
-                        : "s"
+                `${scan.host_count ?? 0} Host${scan.host_count === 1
+                    ? ""
+                    : "s"
                 }`;
 
 
@@ -803,18 +744,18 @@ async function loadHistory() {
                         );
 
 
-                        if (
-                            job.status ===
-                            "completed"
-                        ) {
+                        if (job.status === "completed") {
 
-                            await loadScanResults(
-                                scan.id
-                            );
+                            await loadScanResults(scan.id);
 
+                            if (activeScanId === scan.id && !resultsSection.hidden) {
+                                resultsSection.scrollIntoView({
+                                    behavior: "smooth",
+                                    block: "start"
+                                });
+                            }
 
                         } else {
-
                             resultsSection.hidden =
                                 true;
 
@@ -825,9 +766,9 @@ async function loadHistory() {
 
                             if (
                                 job.status ===
-                                    "pending" ||
+                                "pending" ||
                                 job.status ===
-                                    "running"
+                                "running"
                             ) {
 
                                 void monitorScan(
@@ -836,6 +777,13 @@ async function loadHistory() {
 
                             }
 
+                        }
+
+                        if (job.status !== "completed") {
+                            statusSection.scrollIntoView({
+                                behavior: "smooth",
+                                block: "start"
+                            });
                         }
 
 
