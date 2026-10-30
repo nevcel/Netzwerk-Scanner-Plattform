@@ -70,15 +70,28 @@ func (e *Executor) Run(ctx context.Context, target string) ([]byte, error) {
 		return nil, err
 	}
 
-	cmd := exec.CommandContext(
-		ctx,
-		"nmap",
+	// Begrenzter TCP-Scan mit reduzierter Diensterkennung.
+	args := []string{
 		"-sT",
 		"-sV",
-		"-oX",
-		"-",
-		target,
-	)
+		"--version-light",
+		"--top-ports", "100",
+		"-T4",
+		"--max-retries", "2",
+	}
+
+	// Einzelziele werden auch bei blockierter Host-Erkennung geprüft.
+	// Bei Netzbereichen werden zuerst erreichbare Ziele ermittelt.
+	if strings.Contains(target, "/") {
+		args = append(args, "-PS22,80,443,445,3389")
+	} else {
+		args = append(args, "-Pn")
+	}
+
+	// Strukturierte XML-Ausgabe für die Verarbeitung im Backend.
+	args = append(args, "-oX", "-", target)
+
+	cmd := exec.CommandContext(ctx, "nmap", args...)
 
 	// stdout enthält das XML-Ergebnis. stderr wird getrennt
 	// gesammelt, damit technische Details geloggt werden können.

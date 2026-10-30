@@ -150,7 +150,7 @@ func (s *ScanService) runScan(id string) {
 	// Ein Timeout begrenzt die maximale Laufzeit von Nmap.
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
-		2*time.Minute,
+		30*time.Minute,
 	)
 	defer cancel()
 
