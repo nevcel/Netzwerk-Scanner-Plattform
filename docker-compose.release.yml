@@ -3,7 +3,7 @@ name: netzwerk-scanner-release
 
 services:
   database:
-    image: nevce/netzwerk-scanner-db:1.0
+    image: nevce/netzwerk-scanner-db:1.1
     environment:
       POSTGRES_DB: network_scanner
       POSTGRES_USER: network_scanner
@@ -18,7 +18,7 @@ services:
     restart: unless-stopped
 
   scanner:
-    image: nevce/netzwerk-scanner-scanner:1.0
+    image: nevce/netzwerk-scanner-scanner:1.1
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -31,7 +31,7 @@ services:
       retries: 5
 
   backend:
-    image: nevce/netzwerk-scanner-backend:1.0
+    image: nevce/netzwerk-scanner-backend:1.1
     environment:
       DB_HOST: database
       DB_PORT: "5432"
@@ -51,7 +51,7 @@ services:
       - ALL
 
   frontend:
-    image: nevce/netzwerk-scanner-frontend:1.0
+    image: nevce/netzwerk-scanner-frontend:1.1
     ports:
       - "127.0.0.1:3000:8080"
     depends_on:
