@@ -1,0 +1,66 @@
+
+name: netzwerk-scanner-release
+
+services:
+  database:
+    image: nevce/netzwerk-scanner-db:1.0
+    environment:
+      POSTGRES_DB: network_scanner
+      POSTGRES_USER: network_scanner
+      POSTGRES_PASSWORD: ${NETZWERK_SCANNER_DB_PASSWORD:?Datenbankpasswort erforderlich}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U network_scanner -d network_scanner"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  scanner:
+    image: nevce/netzwerk-scanner-scanner:1.0
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: nevce/netzwerk-scanner-backend:1.0
+    environment:
+      DB_HOST: database
+      DB_PORT: "5432"
+      POSTGRES_DB: network_scanner
+      POSTGRES_USER: network_scanner
+      POSTGRES_PASSWORD: ${NETZWERK_SCANNER_DB_PASSWORD:?Datenbankpasswort erforderlich}
+      SCANNER_URL: http://scanner:8081
+    depends_on:
+      database:
+        condition: service_healthy
+      scanner:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  frontend:
+    image: nevce/netzwerk-scanner-frontend:1.0
+    ports:
+      - "127.0.0.1:3000:8080"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  postgres_data:
