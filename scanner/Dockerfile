@@ -25,6 +25,7 @@ RUN addgroup -S scanner && adduser -S scanner -G scanner
 
 WORKDIR /app
 
+
 COPY --from=builder /scanner /app/scanner
 
 USER scanner
